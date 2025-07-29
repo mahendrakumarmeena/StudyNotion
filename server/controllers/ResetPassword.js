@@ -1,0 +1,126 @@
+const User = require("../models/User")
+const mailSender = require("../utils/MailSender")
+const bcrypt = require("bcrypt")
+const crypto = require("crypto")
+
+//resetPassword Token
+exports.resetPasswordToken = async (req, res) => {
+  try {
+
+    //fetch email from request bady
+    const email = req.body.email
+
+    //check user for this email , email validation
+    const user = await User.findOne({ email: email })
+    if (!user) {
+      return res.json({
+        success: false,
+        message: `This Email: ${email} is not Registered With Us Enter a Valid Email `,
+      })
+    }
+
+
+    //generate token
+    const token = crypto.randomBytes(20).toString("hex")
+
+
+    //Update user key by adding token and expiration time
+    const updatedDetails = await User.findOneAndUpdate(
+      { email: email },
+      {
+        token: token,
+        resetPasswordExpires: Date.now() + 3600000,
+      },
+      { new: true }
+    )
+    console.log("DETAILS", updatedDetails)
+
+    // create url 
+    const url = `http://localhost:3000/update-password/${token}`
+    // const url = `https://studynotion-edtech-project.vercel.app/update-password/${token}`
+
+    // send email containing the url
+    await mailSender(
+      email,
+      "Password Reset",
+      `Your Link for email verification is ${url}. Please click this url to reset your password.`
+    )
+
+    res.json({
+      success: true,
+      message:
+        "Email Sent Successfully, Please Check Your Email to Continue Further",
+    })
+  } catch (error) {
+    return res.json({
+      error: error.message,
+      success: false,
+      message: `Some Error in Sending the Reset Message`,
+    })
+  }
+}
+
+// reseetPassword 
+exports.resetPassword = async (req, res) => {
+  try {
+
+    // fetch data
+    const { password, confirmPassword, token } = req.body
+
+    // validation
+    if (confirmPassword !== password) {
+      return res.json({
+        success: false,
+        message: "Password and Confirm Password Does not Match",
+      })
+    }
+
+    // get user Details form db using token
+    const userDetails = await User.findOne({ token: token })
+    console.log("TOKEN ",userDetails);
+
+    //if no entry - invalid token
+    if (!userDetails) {
+      return res.json({
+        success: false,
+        message: "Token is Invalid",
+      })
+    }
+
+    //token time check
+    if (!(userDetails.resetPasswordExpires > Date.now())) {
+      return res.status(403).json({
+        success: false,
+        message: `Token is Expired, Please Regenerate Your Token`,
+      })
+    }
+
+    // hash password
+    const encryptedPassword = await bcrypt.hash(password, 10)
+    
+    //password update
+    await User.findOneAndUpdate(
+      { 
+        token: token 
+      },
+      { 
+        password: encryptedPassword 
+      },
+      { 
+         new: true 
+      }
+    )
+
+    //response
+    res.json({
+      success: true,
+      message: `Password Reset Successful`,
+    })
+  } catch (error) {
+    return res.json({
+      error: error.message,
+      success: false,
+      message: `Some Error in Updating the Password`,
+    })
+  }
+}
